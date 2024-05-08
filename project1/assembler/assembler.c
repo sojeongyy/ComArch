@@ -3,11 +3,58 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #define MAXLINELENGTH 1000
 
 int readAndParse(FILE *, char *, char *, char *, char *, char *);
 int isNumber(char *);
+
+//int reg[8]; //reg0 ~ reg7;
+char* exist_label[MAXLINELENGTH]; //store all labels
+
+void initialize_exist_label (void) {
+for (int i = 0; i < MAXLINELENGTH; i++) {
+    if (exist_label[i] == NULL) {
+        exist_label[i] = malloc(MAXLINELENGTH * sizeof(char));
+        exist_label[i][0] = '\0'; // 초기화
+    }
+}
+}
+
+int duplicatedLabel(char *label) // for error checking
+{
+	for (int i = 0; i < MAXLINELENGTH; i++) 
+	{
+		if (!strcmp(label, exist_label[i]))
+			return 1; //duplicate..
+	}
+	return 0;
+}
+
+int findLabelAddr(char *label)
+{
+	for (int i = 0; i< MAXLINELENGTH; i++) {
+		if (!strcmp(label, exist_label[i])) return i;
+	}
+	printf("ERROR : can't find such label");
+	exit(1);
+	return -1; //can't find such label
+}
+
+int NonintReg(char *reg)
+{
+	if(isNumber(reg)) return 0; //integer register arguments
+	else return 1; //nonInteger!
+}
+
+int RegRangeError(char *reg) //Registers outside the range [0,7]
+{
+	int Reg = atoi(reg);
+	if(Reg < 0 || Reg > 7) return 1;
+	else return 0;
+} 
+
 
 int main(int argc, char *argv[]) 
 {
@@ -38,11 +85,33 @@ int main(int argc, char *argv[])
 
 	/* here is an example for how to use readAndParse to read a line from
 		 inFilePtr */
-	if (!readAndParse(inFilePtr, label, opcode, arg0, arg1, arg2)) {
+	//if (!readAndParse(inFilePtr, label, opcode, arg0, arg1, arg2)) {
 		/* reached end of file */
-	}
+	//}
 
 	/* TODO: Phase-1 label calculation */
+	//handling label error && save label
+
+	initialize_exist_label();
+	int address = 0;
+	while(readAndParse(inFilePtr, label, opcode, arg0, arg1, arg2)) {
+		if(label[0] != '\0') {
+			if (duplicatedLabel(label))
+			{
+				printf("ERROR : duplicated definition of labels");
+				exit(1);
+			}
+			if (isNumber(label) || strlen(label) > 6)
+			{
+				printf("LABEL ERROR");
+				exit(1);
+			}
+
+			strcpy(exist_label[address], label);
+		}
+		address++;
+	}
+
 
 	/* this is how to rewind the file ptr so that you start reading from the
 		 beginning of the file */
@@ -52,8 +121,102 @@ int main(int argc, char *argv[])
 
 	/* after doing a readAndParse, you may want to do the following to test the
 		 opcode */
-	if (!strcmp(opcode, "add")) {
-		/* do whatever you need to do for opcode "add" */
+
+	int line = 0;
+	while(readAndParse(inFilePtr, label, opcode, arg0,
+		arg1, arg2))
+	{	
+		int inst = 0;
+
+		if(!(strcmp(opcode, "noop") == 0 || strcmp(opcode, "halt") == 0 || strcmp(opcode, ".fill") == 0) && (NonintReg(arg0) || NonintReg(arg1))) {
+			printf("%d\n", strcmp(opcode, "noop"));
+			printf("ERROR : Non-integer register arguments");
+			exit(1);
+		}	
+		if(strcmp(opcode, ".fill") && RegRangeError(arg0) || RegRangeError(arg1)) {
+			printf("ERROR : registers outside the range [0,7]");
+			exit(1);
+		}	
+
+		if (!strcmp(opcode, "add") || !strcmp(opcode, "nor")) { //R-type	
+			if(NonintReg(arg2)) {
+                        	printf("ERROR : Non-integer register arguments");
+                        	exit(1);
+                		}	
+                	if(RegRangeError(arg2)) {
+                        	printf("ERROR : registers outside the range [0,7]");
+                        	exit(1);
+                	}
+
+			if (!strcmp(opcode, "add")) {
+				inst |= 0 << 22; //(add)opcode = 000
+				//reg[atoi(arg2)] = reg[atoi(arg0)] + reg[atoi(arg1)];
+			}
+			if (!strcmp(opcode, "nor")) {
+				inst |= 1 << 22; //(nor)opcode = 001
+				//reg[atoi(arg2)] = ~(reg[atoi(arg0)] | reg[atoi(arg1)]);
+			}
+			
+			inst |= (atoi(arg0) << 19);
+			inst |= (atoi(arg1) << 16);
+			inst |= (atoi(arg2) << 0);
+		} //end of R-type
+		
+		else if (!strcmp(opcode, "lw") || !strcmp(opcode, "sw") || !strcmp(opcode, "beq")) {
+			
+			//opcode set
+			if (!strcmp(opcode, "lw")) inst |= 0b10 << 22;
+			if (!strcmp(opcode, "sw")) inst |= 0b11 << 22;
+			if (!strcmp(opcode, "beq")) inst |= 0b100 << 22;
+
+			int addr = 0;
+
+			if (!isNumber(arg2)) { //symbolic addresses
+				addr = findLabelAddr(arg2);
+				if (!strcmp(opcode, "beq")) {
+					addr = addr - line - 1;
+					//addr = (unsigned short)addr;
+				}
+			}
+			else if (isNumber(arg2)) addr = atoi(arg2); //numeric address
+			
+			int min = -(1 << 15);
+    			int max = (1 << 15) - 1;
+			if (addr < min || addr > max) {
+				printf("ERROR : offsetFields that does not fit in 16 bits");
+				exit(1);
+			}
+			
+			inst |= atoi(arg0) << 19;
+                        inst |= atoi(arg1) << 16;
+                        if (strcmp(opcode, "beq")) inst |= addr << 0;
+			else if (!strcmp(opcode, "beq")) inst |= (isNumber(arg2) ? addr : (unsigned short)addr);
+		} //end of I-type
+	
+		else if (!strcmp(opcode, "jalr")) {
+			inst |= 0b101 << 22; //opcode
+
+			inst |= atoi(arg0) << 19;
+			inst |= atoi(arg1) << 16;
+		}
+
+	 	else if (!strcmp(opcode, "halt") || !strcmp(opcode, "noop")) {
+			if (!strcmp(opcode, "halt")) inst |= 0b110 << 22;
+			if (!strcmp(opcode, "noop")) inst |= 0b111 << 22;
+		}
+		
+		else if (!strcmp(opcode, ".fill")) {
+			if (isNumber(arg0)) inst = atoi(arg0);
+			else inst = findLabelAddr(arg0);
+		}
+
+		else {
+			printf("ERROR : Unrecognized opcodes");
+			exit(1);
+		}
+	
+		printf("%d\n", inst);
+		line++;	
 	}
 
 	if (inFilePtr) {
