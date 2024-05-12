@@ -109,6 +109,7 @@ int main(int argc, char *argv[])
 		break;
 
 	    case 7: //noop
+		state.pc++;
 		break;
 	} //switch end
     } //while end	
