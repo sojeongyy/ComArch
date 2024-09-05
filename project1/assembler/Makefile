@@ -7,7 +7,7 @@ TARGET = assembler
 all : $(TARGET)
  
 $(TARGET): $(OBJS)
-	$(CC) -o $@ $(OBJS)
+	$(CC) -o $@ $(OBJS) -g -fsanitize=address
  
 clean :
 	rm -f $(OBJS) $(TARGET)
